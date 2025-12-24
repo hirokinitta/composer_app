@@ -1,0 +1,13 @@
+syntax = "proto3";
+package engine;
+option go_package = "./engine";
+
+service AudioEngine {
+  rpc TogglePlayback (TogglePlaybackRequest) returns (TogglePlaybackResponse);
+  rpc SetFaderValue (SetFaderValueRequest) returns (SetFaderValueResponse);
+}
+
+message TogglePlaybackRequest { bool should_play = 1; }
+message TogglePlaybackResponse { bool success = 1; string message = 2; }
+message SetFaderValueRequest { int32 deck_id = 1; float fader_value = 2; }
+message SetFaderValueResponse { bool success = 1; }

@@ -1,0 +1,26 @@
+﻿{
+  "name": "electron-ui",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "out/main/index.js",
+  "scripts": {
+    "start": "electron .",
+    "dev:web": "vite",
+    "build:web": "vite build",
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "preview": "electron-vite preview",
+    "generate-audio": "node scripts/generate-test-audio.js",
+    "electron:dev": "electron electron-wrapper.cjs"
+  },
+  "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "^3.1.2",
+    "electron": "^28.0.0",
+    "electron-vite": "^4.0.1",
+    "svelte": "^4.2.20",
+    "vite": "^5.4.21"
+  },
+  "dependencies": {
+    "wavefile": "^11.0.0"
+  }
+}

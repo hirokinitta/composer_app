@@ -1,0 +1,291 @@
+// import { writable } from 'svelte/store';
+
+// // -------------------------------------------------------------------
+// // 1. WebSocket 接続と状態管理のためのストア定義
+// // -------------------------------------------------------------------
+
+// // WebSocketの接続状態
+// export const wsStatus = writable('disconnected'); // 'connected', 'disconnected', 'error', 'connecting'
+
+// // デッキとミキサーの最新ステータス
+// // Goバックエンドの GetStatus() が返す構造体に合わせます
+// const initialStatus = {
+//     deckA: {
+//         file: '',
+//         playing: false,
+//         position: 0,
+//         duration: 0,
+//         bpm: 0,
+//         speed: 1.0,
+//         volume: 1.0,
+//         eq: { low: 0, mid: 0, high: 0 },
+//         filter: { type: 'none', cutoff: 0, resonance: 0 },
+//         loop: { enabled: false, start: 0, end: 0 },
+//         cuePoints: []
+//     },
+//     deckB: {
+//         file: '',
+//         playing: false,
+//         position: 0,
+//         duration: 0,
+//         bpm: 0,
+//         speed: 1.0,
+//         volume: 1.0,
+//         eq: { low: 0, mid: 0, high: 0 },
+//         filter: { type: 'none', cutoff: 0, resonance: 0 },
+//         loop: { enabled: false, start: 0, end: 0 },
+//         cuePoints: []
+//     },
+//     mixer: {
+//         crossfader: 0.5,
+//         masterVolume: 1.0,
+//         syncEnabled: false,
+//         syncMaster: '' // 'a' or 'b'
+//     }
+// };
+
+// export const mixerStatus = writable(initialStatus);
+
+// // -------------------------------------------------------------------
+// // 2. WebSocket 接続ロジック
+// // -------------------------------------------------------------------
+
+// const WS_URL = 'ws://localhost:8080/ws/status';
+// let ws = null;
+// let reconnectInterval = 1000; // 再接続試行間隔 (ミリ秒)
+
+// /**
+//  * WebSocket接続を確立し、メッセージ受信時のストア更新を設定する。
+//  */
+// function connect() {
+//     if (ws && ws.readyState === WebSocket.OPEN) {
+//         return;
+//     }
+    
+//     wsStatus.set('connecting');
+//     console.log('Attempting to connect to WebSocket...');
+
+//     try {
+//         ws = new WebSocket(WS_URL);
+//     } catch (e) {
+//         console.error('WebSocket creation failed:', e);
+//         wsStatus.set('error');
+//         scheduleReconnect();
+//         return;
+//     }
+
+//     ws.onopen = () => {
+//         console.log('✅ WebSocket Connected!');
+//         wsStatus.set('connected');
+//         reconnectInterval = 1000; // 成功したらリセット
+//     };
+
+//     ws.onmessage = (event) => {
+//         try {
+//             const data = JSON.parse(event.data);
+//             mixerStatus.set(data);
+//         } catch (e) {
+//             console.error('❌ Error parsing WebSocket message:', e, event.data);
+//         }
+//     };
+
+//     ws.onclose = () => {
+//         console.log('🔌 WebSocket Disconnected. Attempting reconnect...');
+//         wsStatus.set('disconnected');
+//         scheduleReconnect();
+//     };
+
+//     ws.onerror = (err) => {
+//         console.error('❌ WebSocket Error:', err);
+//         wsStatus.set('error');
+//         // onclose も呼ばれることが多いが、念のため
+//         if (ws.readyState !== WebSocket.OPEN && ws.readyState !== WebSocket.CONNECTING) {
+//             scheduleReconnect();
+//         }
+//     };
+// }
+
+// /**
+//  * 再接続を試みるためのタイマーを設定する。
+//  */
+// function scheduleReconnect() {
+//     if (wsStatus === 'connected' || wsStatus === 'connecting') {
+//         return;
+//     }
+    
+//     setTimeout(() => {
+//         connect();
+//     }, reconnectInterval);
+    
+//     // 最大再接続間隔を制限 (例: 30秒)
+//     reconnectInterval = Math.min(30000, reconnectInterval * 2);
+// }
+
+// /**
+//  * 外部から接続を開始するための関数。
+//  */
+// export function startWebSocketConnection() {
+//     connect();
+// }
+
+// /**
+//  * 外部から接続を閉じるための関数 (アプリケーション終了時など)。
+//  */
+// export function closeWebSocketConnection() {
+//     if (ws) {
+//         ws.close();
+//         ws = null;
+//     }
+// }
+
+
+import { writable } from 'svelte/store';
+
+// 接続設定
+const WS_URL = 'ws://localhost:8080/ws/status'; // GoサーバーのWebSocketエンドポイントを仮定
+
+/**
+ * WebSocket接続の状態を保持するストア
+ * 'disconnected', 'connecting', 'connected', 'error'
+ */
+export const wsStatus = writable('disconnected');
+
+/**
+ * Goバックエンドから受信したアプリケーションの全体ステータスを保持するストア
+ */
+export const mixerStatus = writable({
+    deckA: {
+        id: 'a',
+        playing: false,
+        cueEnabled: false, // ProMixerのために追加
+        gain: 1.0,          // ProMixerのために追加
+        pitch: 0.0,
+        bpm: 128.0,
+        trackInfo: null,
+        currentTime: 0,
+        totalTime: 0,
+    },
+    deckB: {
+        id: 'b',
+        playing: false,
+        cueEnabled: false, // ProMixerのために追加
+        gain: 1.0,          // ProMixerのために追加
+        pitch: 0.0,
+        bpm: 128.0,
+        trackInfo: null,
+        currentTime: 0,
+        totalTime: 0,
+    },
+    mixer: {
+        crossfader: 0.0, // -1.0 (A) to 1.0 (B)
+        masterVolume: 1.0,
+        syncEnabled: false,
+        syncMaster: 'a',
+    },
+});
+
+let ws;
+let reconnectInterval = 1000;
+
+/**
+ * WebSocket接続を開始します。
+ */
+export function startWebSocketConnection() {
+    // 既存の接続が OPEN であれば、何もしない
+    if (ws && ws.readyState === WebSocket.OPEN) return;
+
+    // 💡 修正: 既存の接続がある場合、強制的にクリーンに閉じる
+    // これにより、多重接続の試行を防ぐ
+    if (ws) {
+        // CLOSE状態ではない場合のみ閉じる (クリーンコード1000で onclose が自動リトライしないように)
+        if (ws.readyState !== WebSocket.CLOSED) {
+            console.log('Force closing previous WebSocket connection...');
+            ws.close(1000, 'Reconnection attempt clean up'); 
+        }
+        ws = null; // 既存のオブジェクトをリセット
+    }
+
+
+    wsStatus.set('connecting');
+    console.log(`Attempting to connect to ${WS_URL}...`);
+
+    try {
+        ws = new WebSocket(WS_URL);
+    } catch (e) {
+        console.error('WebSocket creation failed:', e);
+        wsStatus.set('error');
+        // WebSocketオブジェクトの作成自体が失敗した場合もリトライ
+        setTimeout(startWebSocketConnection, reconnectInterval);
+        reconnectInterval = Math.min(reconnectInterval * 2, 30000);
+        return;
+    }
+
+    ws.onopen = () => {
+        wsStatus.set('connected');
+        console.log('WebSocket Connected successfully.');
+        reconnectInterval = 1000; // 成功したらリセット
+    };
+
+    ws.onmessage = (event) => {
+        try {
+            const data = JSON.parse(event.data);
+            
+            // 💡 修正：Goサーバーはステータスオブジェクトを直接送ってくるため、
+            // 型チェックを外すか、データの構造を見て判断する
+            if (data.deckA && data.deckB && data.mixer) {
+                // 生のステータスデータとしてストアを更新
+                mixerStatus.set(data);
+                // console.log('Mixer status updated:', data); // デバッグ用
+            } else if (data.type === 'STATUS_UPDATE') {
+                // 念のため、以前の形式も受け入れ可能にしておく
+                mixerStatus.set(data.payload);
+            }
+        } catch (e) {
+            console.error('Error parsing WebSocket message:', e, event.data);
+        }
+    };
+
+    ws.onclose = (event) => {
+        if (event.wasClean) {
+            console.log(`WebSocket closed cleanly, code=${event.code} reason=${event.reason}`);
+        } else {
+            // サーバーダウンなどの異常な切断
+            console.error('WebSocket connection died. Retrying...');
+        }
+        wsStatus.set('disconnected');
+
+        // 自動再接続ロジック
+        setTimeout(startWebSocketConnection, reconnectInterval);
+        reconnectInterval = Math.min(reconnectInterval * 2, 30000); // 指数関数的なバックオフ
+    };
+
+    ws.onerror = (error) => {
+        console.error('WebSocket Error:', error);
+        // エラー後、oncloseが呼ばれ、再接続が試みられます
+        wsStatus.set('error');
+    };
+}
+
+/**
+ * WebSocket接続を閉じます。
+ */
+export function closeWebSocketConnection() {
+    if (ws) {
+        // ws.onclose が再接続を試みないよう、クリーンな終了コードで閉じる
+        ws.close(1000, 'Component destroyed');
+        ws = null;
+    }
+}
+
+/**
+ * Goバックエンドにコマンドを送信します。
+ * 現状、APIはHTTPを使っているため、この関数は未使用ですが、将来的に必要になる場合があります。
+ * @param {object} message - 送信するオブジェクト
+ */
+// export function sendToBackend(message) {
+//     if (ws && ws.readyState === WebSocket.OPEN) {
+//         ws.send(JSON.stringify(message));
+//     } else {
+//         console.warn('WebSocket not open. Message not sent:', message);
+//     }
+// }
